@@ -1,0 +1,9 @@
+#pragma once
+
+// Copy this file to network_config.h, then enter your private settings.
+// network_config.h is ignored by Git so the password is not uploaded.
+
+#define WIFI_SSID       "YOUR_2_4_GHZ_WIFI_NAME"
+#define WIFI_PASSWORD   "YOUR_WIFI_PASSWORD"
+#define PI_IP_ADDRESS   "192.168.1.100"
+#define PI_UDP_PORT     3333

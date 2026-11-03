@@ -133,3 +133,21 @@ esp_err_t joystick_read(joystick_reading_t *reading)
     // Tell the caller that every joystick value was read successfully.
     return ESP_OK;
 }
+
+// Convert one joystick sample into a word for the LCD and network packet.
+const char *joystick_get_direction(const joystick_reading_t *reading)
+{
+    // Reject a bad pointer safely.
+    if (reading == NULL) return "UNKNOWN";
+
+    // Check Y first for forward and backward movement.
+    if (reading->raw_y > 2800) return "UP";
+    if (reading->raw_y < 1300) return "DOWN";
+
+    // Then check X for left and right movement.
+    if (reading->raw_x < 1300) return "LEFT";
+    if (reading->raw_x > 2800) return "RIGHT";
+
+    // Values inside the dead zone mean the joystick is centered.
+    return "CENTER";
+}

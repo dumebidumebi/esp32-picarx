@@ -14,3 +14,8 @@ dependencies.lock
 *.tmp
 *.swp
 *~
+__pycache__/
+*.pyc
+
+# Local network settings contain the Wi-Fi password and are never committed.
+main/network_config.h

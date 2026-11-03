@@ -25,28 +25,16 @@
 // Our LCD module controls the 16x2 display over I2C.
 #include "lcd_i2c.h"
 
+// Our network module sends joystick readings to the Raspberry Pi over UDP.
+#include "wifi_udp.h"
+
 // This label appears beside this file's serial-monitor messages.
 static const char *TAG = "controller";
 
-// This handle lets both FreeRTOS tasks use the same queue.
-// The queue carries joystick_reading_t structures between the tasks.
-static QueueHandle_t joystick_queue;
-
-// Turn the raw joystick numbers into a word a person can understand.
-static const char *get_direction(const joystick_reading_t *reading)
-{
-    // This dead zone prevents small center changes from changing direction.
-    // Check Y first for forward and backward movement.
-    if (reading->raw_y > 2800) return "UP";
-    if (reading->raw_y < 1300) return "DOWN";
-
-    // Then check X for left and right movement.
-    if (reading->raw_x < 1300) return "LEFT";
-    if (reading->raw_x > 2800) return "RIGHT";
-
-    // Values between the limits are treated as the center position.
-    return "CENTER";
-}
+// Each consumer needs its own queue because receiving removes an item.
+// One queue supplies the LCD and the other supplies the UDP sender.
+static QueueHandle_t lcd_queue;
+static QueueHandle_t udp_queue;
 
 // Write exactly one clean 16-character row to the LCD.
 static esp_err_t lcd_write_line(uint8_t row, const char *text)
@@ -90,9 +78,10 @@ static void joystick_task(void *argument)
 
         // Only use the reading when the hardware read succeeded.
         if (result == ESP_OK) {
-            // This one-item queue always keeps the newest reading.
-            // If old data is waiting, xQueueOverwrite replaces it.
-            xQueueOverwrite(joystick_queue, &reading);
+            // Give separate copies to the local display and network sender.
+            // Each one-item queue always keeps the newest reading.
+            xQueueOverwrite(lcd_queue, &reading);
+            xQueueOverwrite(udp_queue, &reading);
 
             // Also print the values so they can be checked in the monitor.
             ESP_LOGI(TAG, "X:%4d Y:%4d SW:%d", reading.raw_x,
@@ -120,7 +109,7 @@ static void lcd_task(void *argument)
     while (1) {
         // Wait here until the joystick task places data in the queue.
         // portMAX_DELAY means there is no timeout while waiting.
-        if (xQueueReceive(joystick_queue, &reading, portMAX_DELAY) == pdTRUE) {
+        if (xQueueReceive(lcd_queue, &reading, portMAX_DELAY) == pdTRUE) {
             // Build the first row from the two raw ADC readings.
             snprintf(line, sizeof(line), "X:%4d Y:%4d", reading.raw_x,
                      reading.raw_y);
@@ -131,7 +120,7 @@ static void lcd_task(void *argument)
             // Build the second row from the direction and button state.
             // %-10s gives the direction a fixed-width space on the screen.
             snprintf(line, sizeof(line), "%-10s SW:%d",
-                     get_direction(&reading), reading.button_pressed);
+                     joystick_get_direction(&reading), reading.button_pressed);
 
             // Display the direction and switch state on the bottom row.
             ESP_ERROR_CHECK(lcd_write_line(1, line));
@@ -156,12 +145,13 @@ void app_main(void)
     // Start with an empty display.
     ESP_ERROR_CHECK(lcd_i2c_clear());
 
-    // Create a queue that holds exactly one joystick_reading_t structure.
-    joystick_queue = xQueueCreate(1, sizeof(joystick_reading_t));
+    // Create one queue for each independent consumer.
+    lcd_queue = xQueueCreate(1, sizeof(joystick_reading_t));
+    udp_queue = xQueueCreate(1, sizeof(joystick_reading_t));
 
-    // A NULL handle means FreeRTOS could not allocate memory for the queue.
-    if (joystick_queue == NULL) {
-        ESP_LOGE(TAG, "Could not create joystick queue");
+    // A NULL handle means FreeRTOS could not allocate memory for a queue.
+    if (lcd_queue == NULL || udp_queue == NULL) {
+        ESP_LOGE(TAG, "Could not create joystick queues");
         return;
     }
 
@@ -171,4 +161,9 @@ void app_main(void)
 
     // Start the LCD task with a 3072-byte stack and priority 4.
     xTaskCreate(lcd_task, "lcd_task", 3072, NULL, 4, NULL);
+
+    // Start Wi-Fi and pass the UDP task its dedicated reading queue.
+    // Networking can reconnect independently without stopping the LCD.
+    xTaskCreate(wifi_udp_task, "wifi_udp_task", 6144,
+                (void *)udp_queue, 4, NULL);
 }

@@ -23,3 +23,6 @@ esp_err_t joystick_init(void);
 
 // Read the joystick and place the result inside the structure we pass in.
 esp_err_t joystick_read(joystick_reading_t *reading);
+
+// Convert the raw X/Y values into a simple direction word.
+const char *joystick_get_direction(const joystick_reading_t *reading);
